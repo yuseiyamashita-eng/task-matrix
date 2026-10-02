@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>タスク・マトリクス</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f5f6f8;
+    color: #222;
+  }
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 28px 20px 50px;
+  }
+  h1 { margin: 0 0 22px; font-size: 28px; }
+  h2 { margin: 0 0 14px; font-size: 20px; }
+
+  .section {
+    background: #fff;
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 22px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.06);
+  }
+
+  .add-row {
+    display: flex;
+    gap: 10px;
+  }
+  #taskInput {
+    flex: 1;
+    min-width: 0;
+    padding: 11px 13px;
+    border: 1px solid #ccd1d8;
+    border-radius: 8px;
+    font-size: 15px;
+  }
+  button {
+    border: 0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .add-btn { background: #222; color: #fff; }
+  .secondary-btn { background: #eef0f3; color: #333; }
+
+  #unplacedTasks {
+    min-height: 50px;
+  }
+
+  .task-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff;
+    border: 1px solid #dfe3e8;
+    border-radius: 8px;
+    padding: 9px 10px;
+    margin: 6px 0;
+    cursor: grab;
+    user-select: none;
+  }
+  .task-card:active { cursor: grabbing; }
+  .task-card.dragging { opacity: .45; }
+  .task-name {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+  }
+  .task-actions {
+    display: flex;
+    gap: 4px;
+  }
+  .task-actions button {
+    padding: 5px 7px;
+    font-size: 12px;
+    background: #f0f2f5;
+  }
+
+  .matrix-wrap {
+    position: relative;
+    padding: 0 0 0 52px;
+  }
+  .matrix {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    min-height: 560px;
+    border: 1px solid #cfd4da;
+  }
+  .quadrant {
+    position: relative;
+    padding: 42px 12px 12px;
+    min-height: 280px;
+    border-right: 1px solid #cfd4da;
+    border-bottom: 1px solid #cfd4da;
+    background: #fafbfc;
+  }
+  .quadrant:nth-child(2n) { border-right: 0; }
+  .quadrant:nth-child(n+3) { border-bottom: 0; }
+
+  .quadrant-title {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #555;
+  }
+
+  .drop-zone {
+    min-height: 205px;
+  }
+  .drop-zone.drag-over {
+    background: #edf3ff;
+    outline: 2px dashed #8aaef5;
+    outline-offset: -4px;
+    border-radius: 8px;
+  }
+
+  .axis-y {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%) rotate(-90deg);
+    white-space: nowrap;
+    font-size: 13px;
+    color: #555;
+  }
+  .axis-y::before {
+    content: "重要度  高";
+    margin-right: 105px;
+  }
+  .axis-y::after {
+    content: "低";
+  }
+
+  .axis-x {
+    display: flex;
+    justify-content: space-between;
+    padding: 9px 4px 0;
+    font-size: 13px;
+    color: #555;
+  }
+
+  .status {
+    min-height: 20px;
+    margin-top: 10px;
+    font-size: 13px;
+    color: #666;
+  }
+  .error { color: #b42318; }
+
+  @media (max-width: 700px) {
+    .container { padding: 18px 12px 40px; }
+    h1 { font-size: 24px; }
+    .add-row { flex-direction: column; }
+    .matrix { min-height: 460px; }
+    .quadrant { min-height: 230px; padding-left: 8px; padding-right: 8px; }
+    .quadrant-title { left: 8px; }
+    .task-card { font-size: 14px; }
+    .task-actions button { font-size: 11px; padding: 4px 6px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>タスク・マトリクス</h1>
+
+  <section class="section">
+    <h2>新しいタスクを追加</h2>
+    <div class="add-row">
+      <input id="taskInput" type="text" placeholder="タスクを入力">
+      <button class="add-btn" id="addTaskBtn">追加</button>
+    </div>
+    <div id="status" class="status"></div>
+  </section>
+
+  <section class="section">
+    <h2>未配置のタスク</h2>
+    <div id="unplacedTasks" class="drop-zone" data-position="unplaced"></div>
+  </section>
+
+  <section class="section">
+    <h2>タスク・マトリクス</h2>
+    <div class="matrix-wrap">
+      <div class="axis-y">重要度</div>
+      <div class="matrix">
+        <div class="quadrant">
+          <div class="quadrant-title">重要度：高　／　緊急度：低</div>
+          <div class="drop-zone" data-position="high-low"></div>
+        </div>
+        <div class="quadrant">
+          <div class="quadrant-title">重要度：高　／　緊急度：高</div>
+          <div class="drop-zone" data-position="high-high"></div>
+        </div>
+        <div class="quadrant">
+          <div class="quadrant-title">重要度：低　／　緊急度：低</div>
+          <div class="drop-zone" data-position="low-low"></div>
+        </div>
+        <div class="quadrant">
+          <div class="quadrant-title">重要度：低　／　緊急度：高</div>
+          <div class="drop-zone" data-position="low-high"></div>
+        </div>
+      </div>
+      <div class="axis-x">
+        <span>緊急度：低</span>
+        <span>緊急度：高</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <button class="secondary-btn" id="resetBtn">初期配置に戻す</button>
+    <button class="secondary-btn" id="clearBtn">すべて未配置</button>
+  </section>
+</div>
+
+<script>
+const SUPABASE_URL = "https://itvjzcedejzkhaooidei.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_EncVTvQFX73jo1hM7gyqMQ_H0zWQ8Vk";
+const supabaseClient = window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY
+);
+
+const initialTasks = [
+  "10/4 武生一中 講演資料",
+  "11/5 義務教育学校 講演資料",
+  "10/4 金沢Rプライド 持ち物",
+  "就活",
+  "講演の服装（10/14、11/5）",
+  "夜鳴きマニュアル",
+  "みちこさん 実現手段リサーチ",
+  "ストレングス講座の入金",
+  "セルフヘアカット",
+  "SNS投稿（個人、Rつるが）",
+  "言語化・書く・話す練習",
+  "断捨離",
+  "ジム",
+  "自転車",
+  "NISA",
+  "読書",
+  "起床時間固定",
+  "アプリ整理",
+  "PCデータ整理・移行",
+  "マイサービス",
+  "札幌に行く",
+  "ゆんちゃん祝い"
+];
+
+const defaultPositions = {
+  "10/4 武生一中 講演資料": "high-high",
+  "11/5 義務教育学校 講演資料": "high-low",
+  "10/4 金沢Rプライド 持ち物": "high-high",
+  "就活": "high-high",
+  "講演の服装（10/14、11/5）": "high-high",
+  "夜鳴きマニュアル": "high-low",
+  "みちこさん 実現手段リサーチ": "high-low",
+  "ストレングス講座の入金": "high-high",
+  "セルフヘアカット": "low-low",
+  "SNS投稿（個人、Rつるが）": "high-low",
+  "言語化・書く・話す練習": "high-low",
+  "断捨離": "low-low",
+  "ジム": "low-low",
+  "自転車": "low-low",
+  "NISA": "low-low",
+  "読書": "low-low",
+  "起床時間固定": "high-low",
+  "アプリ整理": "low-low",
+  "PCデータ整理・移行": "low-low",
+  "マイサービス": "high-low",
+  "札幌に行く": "low-low",
+  "ゆんちゃん祝い": "high-high"
+};
+
+let tasks = [];
+let draggedId = null;
+
+const $ = (selector) => document.querySelector(selector);
+const statusEl = $("#status");
+
+function setStatus(message, isError = false) {
+  statusEl.textContent = message;
+  statusEl.className = "status" + (isError ? " error" : "");
+}
+
+async function loadTasks() {
+  setStatus("読み込み中…");
+
+  const { data, error } = await supabaseClient
+    .from("tasks")
+    .select("id, created_at, task_name, position, sort_order")
+    .order("sort_order", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (error) {
+    console.error(error);
+    setStatus("タスクの読み込みに失敗しました。", true);
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    await seedInitialTasks();
+    return;
+  }
+
+  tasks = data.map((task, index) => ({
+    ...task,
+    sort_order: task.sort_order ?? index
+  }));
+
+  // 既存データにsort_orderがまだ入っていない場合も、現在の順番を保存
+  if (data.some(t => t.sort_order === null || t.sort_order === undefined)) {
+    await normalizeSortOrders(false);
+  }
+
+  render();
+  setStatus("");
+}
+
+async function seedInitialTasks() {
+  const rows = initialTasks.map((name, index) => ({
+    task_name: name,
+    position: defaultPositions[name] || "unplaced",
+    sort_order: index
+  }));
+
+  const { data, error } = await supabaseClient
+    .from("tasks")
+    .insert(rows)
+    .select("id, created_at, task_name, position, sort_order");
+
+  if (error) {
+    console.error(error);
+    setStatus("初期タスクの登録に失敗しました。", true);
+    return;
+  }
+
+  tasks = data || [];
+  render();
+  setStatus("");
+}
+
+function render() {
+  document.querySelectorAll(".drop-zone").forEach(zone => {
+    zone.innerHTML = "";
+  });
+
+  const grouped = [...tasks].sort((a, b) => {
+    const sa = a.sort_order ?? 0;
+    const sb = b.sort_order ?? 0;
+    return sa - sb || a.id - b.id;
+  });
+
+  grouped.forEach(task => {
+    const zone = document.querySelector(
+      `.drop-zone[data-position="${CSS.escape(task.position || "unplaced")}"]`
+    ) || $("#unplacedTasks");
+
+    zone.appendChild(createTaskCard(task));
+  });
+}
+
+function createTaskCard(task) {
+  const card = document.createElement("div");
+  card.className = "task-card";
+  card.draggable = true;
+  card.dataset.id = task.id;
+
+  const name = document.createElement("div");
+  name.className = "task-name";
+  name.textContent = task.task_name;
+
+  const actions = document.createElement("div");
+  actions.className = "task-actions";
+
+  const editBtn = document.createElement("button");
+  editBtn.textContent = "編集";
+  editBtn.type = "button";
+  editBtn.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const nextName = prompt("タスク名を編集", task.task_name);
+    if (nextName === null) return;
+    const trimmed = nextName.trim();
+    if (!trimmed || trimmed === task.task_name) return;
+
+    const { error } = await supabaseClient
+      .from("tasks")
+      .update({ task_name: trimmed })
+      .eq("id", task.id);
+
+    if (error) {
+      console.error(error);
+      setStatus("編集に失敗しました。", true);
+      return;
+    }
+
+    task.task_name = trimmed;
+    render();
+    setStatus("");
+  });
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.textContent = "削除";
+  deleteBtn.type = "button";
+  deleteBtn.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (!confirm(`「${task.task_name}」を削除する？`)) return;
+
+    const { error } = await supabaseClient
+      .from("tasks")
+      .delete()
+      .eq("id", task.id);
+
+    if (error) {
+      console.error(error);
+      setStatus("削除に失敗しました。", true);
+      return;
+    }
+
+    tasks = tasks.filter(t => t.id !== task.id);
+    await normalizeSortOrders(false);
+    render();
+    setStatus("");
+  });
+
+  actions.append(editBtn, deleteBtn);
+  card.append(name, actions);
+
+  card.addEventListener("dragstart", (event) => {
+    draggedId = task.id;
+    card.classList.add("dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(task.id));
+  });
+
+  card.addEventListener("dragend", () => {
+    draggedId = null;
+    card.classList.remove("dragging");
+    document.querySelectorAll(".drop-zone").forEach(z => z.classList.remove("drag-over"));
+  });
+
+  return card;
+}
+
+function getDragAfterElement(container, y) {
+  const cards = [...container.querySelectorAll(".task-card:not(.dragging)")];
+
+  return cards.reduce((closest, card) => {
+    const box = card.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+
+    if (offset < 0 && offset > closest.offset) {
+      return { offset, element: card };
+    }
+    return closest;
+  }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
+}
+
+document.querySelectorAll(".drop-zone").forEach(zone => {
+  zone.addEventListener("dragover", event => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    zone.classList.add("drag-over");
+
+    const dragging = document.querySelector(".task-card.dragging");
+    if (!dragging) return;
+
+    const afterElement = getDragAfterElement(zone, event.clientY);
+    if (afterElement == null) {
+      zone.appendChild(dragging);
+    } else {
+      zone.insertBefore(dragging, afterElement);
+    }
+  });
+
+  zone.addEventListener("dragleave", event => {
+    if (!zone.contains(event.relatedTarget)) {
+      zone.classList.remove("drag-over");
+    }
+  });
+
+  zone.addEventListener("drop", async event => {
+    event.preventDefault();
+    zone.classList.remove("drag-over");
+
+    const id = Number(event.dataTransfer.getData("text/plain") || draggedId);
+    if (!id) return;
+
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+
+    const newPosition = zone.dataset.position;
+    const orderedIds = [...zone.querySelectorAll(".task-card")]
+      .map(card => Number(card.dataset.id));
+
+    task.position = newPosition;
+    const saved = await saveAllVisualOrder();
+    if (saved) {
+      render();
+      setStatus("並び順を保存しました。");
+    }
+  });
+});
+
+async function saveAllVisualOrder() {
+  const zones = [
+    "unplaced",
+    "high-low",
+    "high-high",
+    "low-low",
+    "low-high"
+  ];
+
+  const updates = [];
+  let order = 0;
+
+  for (const position of zones) {
+    const zone = document.querySelector(
+      `.drop-zone[data-position="${CSS.escape(position)}"]`
+    );
+    if (!zone) continue;
+
+    [...zone.querySelectorAll(".task-card")].forEach(card => {
+      const id = Number(card.dataset.id);
+      const task = tasks.find(t => t.id === id);
+      if (!task) return;
+
+      task.position = position;
+      task.sort_order = order;
+
+      updates.push({
+        id,
+        position,
+        sort_order: order
+      });
+      order++;
+    });
+  }
+
+  for (const update of updates) {
+    const { error } = await supabaseClient
+      .from("tasks")
+      .update({
+        position: update.position,
+        sort_order: update.sort_order
+      })
+      .eq("id", update.id);
+
+    if (error) {
+      console.error(error);
+      setStatus("並び順の保存に失敗しました。", true);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function normalizeSortOrders(showStatus = false) {
+  tasks.sort((a, b) =>
+    (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id
+  );
+
+  for (let index = 0; index < tasks.length; index++) {
+    tasks[index].sort_order = index;
+
+    const { error } = await supabaseClient
+      .from("tasks")
+      .update({ sort_order: index })
+      .eq("id", tasks[index].id);
+
+    if (error) {
+      console.error(error);
+      setStatus("並び順の保存に失敗しました。", true);
+      return false;
+    }
+  }
+
+  if (showStatus) setStatus("並び順を保存しました。");
+  return true;
+}
+
+$("#addTaskBtn").addEventListener("click", addTask);
+$("#taskInput").addEventListener("keydown", event => {
+  if (event.key === "Enter") addTask();
+});
+
+async function addTask() {
+  const input = $("#taskInput");
+  const name = input.value.trim();
+  if (!name) return;
+
+  const maxOrder = tasks.reduce(
+    (max, task) => Math.max(max, Number(task.sort_order ?? 0)),
+    -1
+  );
+
+  const { data, error } = await supabaseClient
+    .from("tasks")
+    .insert({
+      task_name: name,
+      position: "unplaced",
+      sort_order: maxOrder + 1
+    })
+    .select("id, created_at, task_name, position, sort_order")
+    .single();
+
+  if (error) {
+    console.error(error);
+    setStatus("タスクの追加に失敗しました。", true);
+    return;
+  }
+
+  tasks.push(data);
+  input.value = "";
+  render();
+  setStatus("");
+}
+
+$("#clearBtn").addEventListener("click", async () => {
+  if (!confirm("すべて未配置にする？")) return;
+
+  const { error } = await supabaseClient
+    .from("tasks")
+    .update({ position: "unplaced" })
+    .neq("id", -1);
+
+  if (error) {
+    console.error(error);
+    setStatus("変更に失敗しました。", true);
+    return;
+  }
+
+  tasks.forEach(task => task.position = "unplaced");
+  await normalizeSortOrders();
+  render();
+  setStatus("");
+});
+
+$("#resetBtn").addEventListener("click", async () => {
+  if (!confirm("初期配置に戻す？")) return;
+
+  for (const [index, task] of tasks.entries()) {
+    const position = defaultPositions[task.task_name] || "unplaced";
+
+    const { error } = await supabaseClient
+      .from("tasks")
+      .update({
+        position,
+        sort_order: index
+      })
+      .eq("id", task.id);
+
+    if (error) {
+      console.error(error);
+      setStatus("初期配置への復元に失敗しました。", true);
+      return;
+    }
+
+    task.position = position;
+    task.sort_order = index;
+  }
+
+  render();
+  setStatus("");
+});
+
+loadTasks();
+</script>
+</body>
+</html>
