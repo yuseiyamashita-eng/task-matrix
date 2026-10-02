@@ -181,12 +181,14 @@
    ====================== */
 @media (max-width: 600px) {
 
-  .matrix {
-    grid-template-columns: 1fr;
-  }
-
   .matrix-wrap {
     padding-left: 0;
+  }
+
+  .matrix {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+    min-height: 0;
   }
 
   .quadrant {
@@ -194,6 +196,10 @@
     height: auto;
     padding: 42px 10px 10px;
     border-right: none;
+  }
+
+  .drop-zone {
+    min-height: 0;
   }
 
   .task-card {
